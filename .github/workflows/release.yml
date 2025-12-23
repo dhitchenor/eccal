@@ -1,0 +1,373 @@
+name: Release Build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "pubspec.yaml"
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: "3.38.5"
+
+jobs:
+  # Check if version changed and create tag
+  check-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag_exists: ${{ steps.check_tag.outputs.exists }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from pubspec.yaml
+        id: get_version
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | tr -d ' ')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | tr -d ' ')
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag $VERSION already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag $VERSION does not exist"
+          fi
+
+      - name: Create and push tag
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | tr -d ' ')
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+  # Android Build
+  build-android:
+    needs: check-version
+    if: needs.check-version.outputs.tag_exists == 'false'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check-version.outputs.version }}
+      BUILD_PATH: build/app/outputs
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: flutter pub run flutter_launcher_icons
+
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/keystore.jks
+
+      - name: Create key.properties
+        run: |
+          cat > android/key.properties << EOF
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=keystore.jks
+          EOF
+
+      - name: Build APK (split per ABI)
+        run: flutter build apk --release --split-per-abi
+
+      - name: Clean up keystore
+        if: always()
+        run: |
+          rm -f android/app/keystore.jks
+          rm -f android/key.properties
+
+      - name: Rename APKs with version
+        run: |
+          cd ${{ env.BUILD_PATH }}/flutter-apk
+          for file in app-*-release.apk; do
+            arch=$(echo $file | sed 's/app-\(.*\)-release.apk/\1/')
+            mv "$file" "eccal-${VERSION}-${arch}.apk"
+          done
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apks
+          path: ${{ env.BUILD_PATH }}/flutter-apk/eccal-*.apk
+
+  # iOS Build
+  build-ios:
+    needs: check-version
+    if: needs.check-version.outputs.tag_exists == 'false'
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.check-version.outputs.version }}
+      BUILD_PATH: build/ios/iphoneos
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: flutter pub run flutter_launcher_icons
+
+      - name: Build iOS (no codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Create IPA
+        run: |
+          cd ${{ env.BUILD_PATH }}
+          mkdir Payload
+          cp -r Runner.app Payload/
+          zip -r eccal-${VERSION}-ios.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: ${{ env.BUILD_PATH }}/eccal-*.ipa
+
+  # Linux Build
+  build-linux:
+    needs: check-version
+    if: needs.check-version.outputs.tag_exists == 'false'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check-version.outputs.version }}
+      BUILD_PATH: build/linux/x64/release
+      BUNDLE_PATH: build/linux/x64/release/bundle
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: flutter pub run flutter_launcher_icons
+
+      - name: Build Linux
+        run: flutter build linux --release
+
+      - name: Create tarball
+        run: |
+          # Copy desktop file and icon to bundle
+          cp linux/eccal.desktop ${{ env.BUNDLE_PATH }}/
+          cp linux/eccal.png ${{ env.BUNDLE_PATH }}/
+
+          cd ${{ env.BUNDLE_PATH }}
+
+          tar -czf eccal-${VERSION}-linux-x64.tar.gz *
+          mv eccal-${VERSION}-linux-x64.tar.gz ..
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: ${{ env.BUILD_PATH }}/eccal-*.tar.gz
+
+  # Windows Build
+  build-windows:
+    needs: check-version
+    if: needs.check-version.outputs.tag_exists == 'false'
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.check-version.outputs.version }}
+      BUILD_PATH: build/windows/x64/runner
+      BUNDLE_PATH: build/windows/x64/runner/Release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: flutter pub run flutter_launcher_icons
+
+      - name: Build Windows
+        run: flutter build windows --release
+
+      - name: Create ZIP
+        run: |
+          cd ${{ env.BUNDLE_PATH }}
+          Compress-Archive -Path * -DestinationPath "../eccal-$VERSION-windows-x64.zip"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: ${{ env.BUILD_PATH }}/eccal-*.zip
+
+  # macOS Build
+  build-macos:
+    needs: check-version
+    if: needs.check-version.outputs.tag_exists == 'false'
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.check-version.outputs.version }}
+      BUILD_PATH: build/macos/Build/Products/Release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: flutter pub run flutter_launcher_icons
+
+      - name: Build macOS
+        run: flutter build macos --release
+
+      - name: Create ZIP
+        run: |
+          cd ${{ env.BUILD_PATH }}
+          zip -r eccal-${VERSION}-macos.zip eccal.app
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: ${{ env.BUILD_PATH }}/eccal-*.zip
+
+  # Create GitHub Release
+  create-release:
+    needs:
+      [
+        check-version,
+        build-android,
+        build-ios,
+        build-linux,
+        build-windows,
+        build-macos,
+      ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Check if pre-release
+        id: check_prerelease
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          if [[ "$VERSION" =~ -alpha|-beta|-rc[0-9]+ ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "This is a pre-release: $VERSION"
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "This is a stable release: $VERSION"
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check-version.outputs.version }}
+          draft: false
+          prerelease: ${{ steps.check_prerelease.outputs.is_prerelease }}
+          generate_release_notes: true
+          name: Release ${{ needs.check-version.outputs.version }}
+          body: |
+            ## Downloads
+
+            ### Android
+            **APKs (Direct Install):**
+            - `armeabi-v7a` - 32-bit ARM devices (older phones)
+            - `arm64-v8a` - 64-bit ARM devices (most modern phones)
+            - `x86_64` - 64-bit x86 devices (some tablets/emulators)
+
+            ### iOS
+            - IPA (unsigned - for development/testing)
+
+            ### Desktop
+            - **Linux** (x64) - Extract and run
+            - **Windows** (x64) - Extract and run
+            - **macOS** (Universal) - Extract and run
+
+            ---
+
+            📱 **Which APK should I download?**
+            Most modern Android phones use `arm64-v8a`. If unsure, try that one first.
+          files: |
+            artifacts/android-apks/*.apk
+            artifacts/ios-ipa/*.ipa
+            artifacts/linux-x64/*.tar.gz
+            artifacts/windows-x64/*.zip
+            artifacts/macos/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
