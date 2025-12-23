@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0.0-rc1
+Type=Application
+Name=EcCal
+Comment=A cross-platform diary app with CalDAV integration
+Exec=eccal
+Icon=eccal
+Terminal=false
+Categories=Office;Calendar;Utility;
+Keywords=diary;journal;calendar;caldav;notes;
+StartupNotify=true
