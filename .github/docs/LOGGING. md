@@ -1,0 +1,118 @@
+/==============================================\
+## LOGGING SYSTEM USAGE EXAMPLES
+\==============================================/
+
+import '<relative_path_to>/services/logger_service.dart';
+
+#### EXAMPLE 1: Simple single-level logging
+===========================================
+
+void saveEntry() async {
+  try {
+    // ... save logic ...
+    logger.info('Entry saved successfully');
+  } catch (e) {
+    logger.error('Failed to save entry: $e');
+  }
+}
+
+#### EXAMPLE 2: Multi-level logging with different details per level
+====================================================================
+
+void connectToServer(String url) async {
+  logger.info('Attempting to connect to server');
+  
+  try {
+    ===... connection logic ...
+    
+    logger.log(
+      info: 'Connected to server successfully',
+      debug: 'Connected to server at URL: $url',
+    );
+  } catch (e) {
+    logger.log(
+      error: 'Server not reachable',
+      debug: 'Failed to connect to server at URL: $url - Error: $e',
+    );
+  }
+}
+
+#### EXAMPLE 3: Complex error handling with context
+===================================================
+
+Future<void> loadLocalStorage(String path) async {
+  logger.debug('Attempting to load from storage at: $path');
+  
+  try {
+    final file = File(path);
+    
+    if (!await file.exists()) {
+      logger.log(
+        error: 'Storage location not found',
+        debug: 'File does not exist at path: $path',
+      );
+      return;
+    }
+    
+    final content = await file.readAsString();
+    logger.log(
+      info: 'Loaded entries from local storage',
+      debug: 'Loaded ${content.length} bytes from: $path',
+    );
+    
+  } catch (e) {
+    logger.log(
+      error: 'Failed to load from storage',
+      debug: 'Error reading file at $path: $e',
+    );
+  }
+}
+
+#### EXAMPLE 4: File operations
+===============================
+
+Future<void> moveEntries(String oldPath, String newPath) async {
+  logger.log(
+    info: 'Moving entries to new location',
+    debug: 'Moving from $oldPath to $newPath',
+  );
+  
+  try {
+    final entries = await _loadEntriesFrom(oldPath);
+    
+    logger.debug('Found ${entries.length} entries to move');
+    
+    for (final entry in entries) {
+      await _saveEntryTo(entry, newPath);
+      logger.debug('Moved entry: ${entry.id}');
+    }
+    
+    logger.log(
+      info: 'All entries moved successfully',
+      debug: 'Successfully moved ${entries.length} entries from $oldPath to $newPath',
+    );
+    
+  } catch (e) {
+    logger.log(
+      error: 'Failed to move entries',
+      debug: 'Error moving from $oldPath to $newPath: $e',
+    );
+    rethrow;
+  }
+}
+
+### To log or not to log...
+===========================
+
+DON'T log:
+- Passwords or sensitive auth tokens
+- User's diary content
+- Personally identifiable information
+- Every single UI interaction
+
+DO log:
+- Connection attempts and results
+- File operations (paths, success/failure)
+- Sync operations
+- App lifecycle events
+- Errors with context
