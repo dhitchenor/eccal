@@ -1,0 +1,5 @@
+1. clicking skip or do not show again on the server setup dialog, doesn't show the timezone dialog; it only shows up after app restart
+2. clicking skip on the timezone dialog, doesn't show the calendar dialog, even if the server is setup; it only shows up after app restart
+3. when starting app, after server setup is do not show again, the timezone dialog button 'choose timezone' does not navigate to the general tab
+4. the calendar dialog does not wait for the user to navigate away from the general tab, before it is shown.. it gets shown immediately, after navigating TO the general tab
+5. on app restart, when user is at the home screen, if 'choose timezone' or 'choose calendar' is clicked, the UI does not navigate to the settings screen
