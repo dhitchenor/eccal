@@ -44,12 +44,35 @@ class CalendarSignInWidget extends StatefulWidget {
 
 class _CalendarSignInWidgetState extends State<CalendarSignInWidget> {
   late Future<List<CalendarInfo>> _calendarsFuture;
+  bool _isRefreshing = false;
+  int _dropdownKey = 0;
 
   @override
   void initState() {
     super.initState();
     final settings = context.read<SettingsProvider>();
     _calendarsFuture = _loadCalendars(settings);
+  }
+
+  Future<void> _refreshCalendars() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+    try {
+      final settings = context.read<SettingsProvider>();
+      await settings.clearCachedCalendarList();
+      final newCalFuture = _fetchCalendarsFromServer(settings);
+      setState(() {
+        _calendarsFuture = newCalFuture;
+      });
+      await newCalFuture;
+      if (mounted) setState(() => _dropdownKey++);
+    } catch (e) {
+      if (mounted) {
+        ErrorSnackbar.showError(context, 'error_'.tr([e.toString()]));
+      }
+    } finally {
+      if (mounted) setState(() => _isRefreshing = false);
+    }
   }
 
   @override
@@ -268,36 +291,60 @@ class _CalendarSignInWidgetState extends State<CalendarSignInWidget> {
                 : constraints.maxWidth * 0.8;
             final finalWidth = dropdownWidth > 200 ? dropdownWidth : 200.0;
 
-            return DropdownMenu<CalendarInfo>(
-              width: finalWidth,
-              menuHeight:
-                  300, // Limit height to show ~5 entries (60px per entry)
-              initialSelection: calendars.firstWhere(
-                (cal) => cal.id == currentCalendarId,
-                orElse: () => calendars.first,
-              ),
-              dropdownMenuEntries: calendars.map((cal) {
-                return DropdownMenuEntry<CalendarInfo>(
-                  value: cal,
-                  label: cal.name,
-                );
-              }).toList(),
-              label: Text('server_settings.calendar_name'.tr()),
-              hintText: 'server_settings.calendar_hint'.tr(),
-              enableFilter: true,
-              enableSearch: true,
-              requestFocusOnTap: true,
-              onSelected: (CalendarInfo? selection) async {
-                if (selection != null) {
-                  await _onCalendarSelected(
-                    context,
-                    selection.id,
-                    selection.name,
-                    calendars,
-                    settings,
-                  );
-                }
-              },
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                DropdownMenu<CalendarInfo>(
+                  key: ValueKey(_dropdownKey),
+                  width:
+                      finalWidth - 48, // Reserve space for the refresh button
+                  menuHeight:
+                      300, // Limit height to show ~5 entries (60px per entry)
+                  initialSelection: calendars.firstWhere(
+                    (cal) => cal.id == currentCalendarId,
+                    orElse: () => calendars.first,
+                  ),
+                  dropdownMenuEntries: calendars.map((cal) {
+                    return DropdownMenuEntry<CalendarInfo>(
+                      value: cal,
+                      label: cal.name,
+                    );
+                  }).toList(),
+                  label: Text('server_settings.calendar_name'.tr()),
+                  hintText: 'server_settings.calendar_hint'.tr(),
+                  enableFilter: true,
+                  enableSearch: true,
+                  requestFocusOnTap: true,
+                  onSelected: (CalendarInfo? selection) async {
+                    if (selection != null) {
+                      await _onCalendarSelected(
+                        context,
+                        selection.id,
+                        selection.name,
+                        calendars,
+                        settings,
+                      );
+                    }
+                  },
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: _isRefreshing
+                      ? const Padding(
+                          padding: EdgeInsets.all(8.0),
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : IconButton(
+                          icon: const Icon(Icons.refresh),
+                          tooltip: 'server_settings.refresh_calendars'.tr(),
+                          onPressed: widget.syncDisabled
+                              ? null
+                              : _refreshCalendars,
+                        ),
+                ),
+              ],
             );
           },
         ),

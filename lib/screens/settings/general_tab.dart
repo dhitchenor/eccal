@@ -5,7 +5,7 @@ import '../../utils/app_localizations.dart';
 import '../../utils/time_helper.dart';
 import 'settings_components.dart';
 
-class GeneralTab extends StatelessWidget {
+class GeneralTab extends StatefulWidget {
   final TextEditingController durationController;
   final TextEditingController titleTemplateController;
 
@@ -14,6 +14,13 @@ class GeneralTab extends StatelessWidget {
     required this.durationController,
     required this.titleTemplateController,
   }) : super(key: key);
+
+  @override
+  State<GeneralTab> createState() => _GeneralTabState();
+}
+
+class _GeneralTabState extends State<GeneralTab> {
+  FocusNode? _timezoneFocusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -66,6 +73,7 @@ class GeneralTab extends StatelessWidget {
                   },
                   fieldViewBuilder:
                       (context, controller, focusNode, onFieldSubmitted) {
+                        _timezoneFocusNode = focusNode;
                         return TextField(
                           controller: controller,
                           focusNode: focusNode,
@@ -117,7 +125,11 @@ class GeneralTab extends StatelessWidget {
                               }
 
                               return InkWell(
-                                onTap: () => onSelected(option),
+                                onTap: () {
+                                  onSelected(option);
+                                  // Unfocus the field so the overlay closes.
+                                  _timezoneFocusNode?.unfocus();
+                                },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
@@ -147,7 +159,7 @@ class GeneralTab extends StatelessWidget {
         SettingsTextFieldRow(
           title: 'general_settings.entry.default_duration'.tr(),
           helperText: 'general_settings.entry.duration'.tr(),
-          controller: durationController,
+          controller: widget.durationController,
           suffix: 'min'.tr(),
           keyboardType: TextInputType.number,
           onChanged: (value) {
@@ -164,7 +176,7 @@ class GeneralTab extends StatelessWidget {
         SettingsTextFieldRow(
           title: 'general_settings.entry.default_title'.tr(),
           helperText: 'general_settings.entry.title_helper'.tr(),
-          controller: titleTemplateController,
+          controller: widget.titleTemplateController,
           labelText: 'general_settings.entry.title_template'.tr(),
           hintText: 'general_settings.entry.default_text'.tr(),
           onChanged: (value) => settings.setDefaultEntryTitle(value),

@@ -112,8 +112,8 @@ Use the search bar to find entries by:
 
 ### Prerequisites
 
-- Flutter SDK 3.38.5 or higher
-- Dart 3.10.4 or higher
+- Flutter SDK 3.41.6
+- Dart SDK 3.11.4
 - Applicable libraries/SDK for platfrom specific builds
 
 

@@ -2,6 +2,13 @@
 # Version Update Script for Windows
 # =====================================
 
+# Regex variables
+$q = "'"  # single quote character
+
+$depMapPattern   = "static const Map<String, String> dependencies = \{([^}]+)\}"
+$devDepMapPattern = "static const Map<String, String> devDependencies = \{([^}]+)\}"
+$kvPattern       = "$q([^$q]+)$q\s*:\s*$q([^$q]+)$q"
+
 # Set error action preference
 $ErrorActionPreference = "Stop"
 
@@ -94,10 +101,10 @@ $APP_VERSION = $CONFIG_VERSION
 Write-Host ""
 Write-Host "--------------------------------------------" -ForegroundColor Yellow
 Write-Host "Current versions in files:" -ForegroundColor Yellow
-Write-Host "  • $APP_CONFIG_FILE : $CONFIG_VERSION (SOURCE OF TRUTH)" -ForegroundColor Green
-Write-Host "  • $PUBSPEC_FILE : $PUBSPEC_VERSION"
-Write-Host "  • $GRADLE_FILE : $GRADLE_VERSION"
-Write-Host "  • $DESKTOP_FILE : $DESKTOP_VERSION"
+Write-Host "  - $APP_CONFIG_FILE : $CONFIG_VERSION (SOURCE OF TRUTH)" -ForegroundColor Green
+Write-Host "  - $PUBSPEC_FILE : $PUBSPEC_VERSION"
+Write-Host "  - $GRADLE_FILE : $GRADLE_VERSION"
+Write-Host "  - $DESKTOP_FILE : $DESKTOP_VERSION"
 
 if (-not $VERSIONS_CONSISTENT) {
     Write-Host ""
@@ -139,10 +146,10 @@ if ($VERSION_CORRECT -match "^[yY]") {
 # =====================================
 Write-Host ""
 Write-Host "Supported formats:" -ForegroundColor Cyan
-Write-Host "  • X.Y.Z (e.g., 1.0.0) - stable release"
-Write-Host "  • X.Y.Z-alpha (e.g., 1.0.0-alpha)"
-Write-Host "  • X.Y.Z-beta (e.g., 1.0.0-beta)"
-Write-Host "  • X.Y.Z-rc1 (e.g., 1.0.0-rc1, 1.0.0-rc2, etc.)"
+Write-Host "  - X.Y.Z (e.g., 1.0.0) - stable release"
+Write-Host "  - X.Y.Z-alpha (e.g., 1.0.0-alpha)"
+Write-Host "  - X.Y.Z-beta (e.g., 1.0.0-beta)"
+Write-Host "  - X.Y.Z-rc1 (e.g., 1.0.0-rc1, 1.0.0-rc2, etc.)"
 Write-Host ""
 
 $response = Read-Host "What should the version number be? [$APP_VERSION]"
@@ -163,10 +170,11 @@ $APP_VERSION = $NEW_VERSION
 
 # Check if this is a pre-release
 $IS_PRERELEASE = $false
-if ($APP_VERSION -match "-alpha|-beta|-rc[0-9]+") {
+$prereleasePattern = '-alpha|-beta|-rc\d+'
+if ($APP_VERSION -match $prereleasePattern) {
     $IS_PRERELEASE = $true
     Write-Host ""
-    Write-Host "ℹ️  This will be marked as a PRE-RELEASE on GitHub" -ForegroundColor Cyan
+    Write-Host "INFO: This will be marked as a PRE-RELEASE on GitHub" -ForegroundColor Cyan
 }
 
 Write-Host ""
@@ -202,10 +210,10 @@ $depOverrides = @{}
 $devDepOverrides = @{}
 
 # Extract and check dependencies
-if ($configFileContent -match "static const Map<String, String> dependencies = \{([^}]+)\}") {
+if ($configFileContent -match $depMapPattern) {
     $depsBlock = $matches[1]
-    $depsBlock -split "`n" | ForEach-Object {
-        if ($_ -match "'([^']+)':\s*'([^']+)'") {
+    $depsBlock -split "`r?`n" | ForEach-Object {
+        if ($_ -match $kvPattern) {
             $package = $matches[1]
             $configVersion = $matches[2]
 
@@ -228,9 +236,9 @@ if ($configFileContent -match "static const Map<String, String> dependencies = \
 
                         if ($choice -eq "2") {
                             $depOverrides[$package] = $pubspecVersion
-                            Write-Host "    → Will use pubspec version: $pubspecVersion" -ForegroundColor Green
+                            Write-Host "    -> Will use pubspec version: $pubspecVersion" -ForegroundColor Green
                         } else {
-                            Write-Host "    → Will use app_config version: $configVersion" -ForegroundColor Green
+                            Write-Host "    -> Will use app_config version: $configVersion" -ForegroundColor Green
                         }
                     }
                 }
@@ -240,10 +248,10 @@ if ($configFileContent -match "static const Map<String, String> dependencies = \
 }
 
 # Extract and check devDependencies
-if ($configFileContent -match "static const Map<String, String> devDependencies = \{([^}]+)\}") {
+if ($configFileContent -match $devDepMapPattern) {
     $devDepsBlock = $matches[1]
-    $devDepsBlock -split "`n" | ForEach-Object {
-        if ($_ -match "'([^']+)':\s*'([^']+)'") {
+    $devDepsBlock -split "`r?`n" | ForEach-Object {
+        if ($_ -match $kvPattern) {
             $package = $matches[1]
             $configVersion = $matches[2]
 
@@ -262,13 +270,14 @@ if ($configFileContent -match "static const Map<String, String> devDependencies 
                         Write-Host "    pubspec.yaml:    $pubspecVersion" -ForegroundColor White
                         Write-Host ""
 
-                        $choice = Read-Host "    Use which version? (1=app_config [$configVersion], 2=pubspec [$pubspecVersion]) [1]"
+                        $choicePrompt = "    Use which version? (1=app_config $configVersion, 2=pubspec $pubspecVersion, default=1)"
+                        $choice = Read-Host $choicePrompt
 
                         if ($choice -eq "2") {
                             $devDepOverrides[$package] = $pubspecVersion
-                            Write-Host "    → Will use pubspec version: $pubspecVersion" -ForegroundColor Green
+                            Write-Host "    -> Will use pubspec version: $pubspecVersion" -ForegroundColor Green
                         } else {
-                            Write-Host "    → Will use app_config version: $configVersion" -ForegroundColor Green
+                            Write-Host "    -> Will use app_config version: $configVersion" -ForegroundColor Green
                         }
                     }
                 }
@@ -360,13 +369,17 @@ $configContent = $configContent -replace "(\s*static const String appVersion\s*=
 # Update app_config.dart with dependency overrides
 foreach ($package in $depOverrides.Keys) {
     $version = $depOverrides[$package]
-    $configContent = $configContent -replace "('$package'\s*:\s*')[^']*(')", "`${1}$version`${2}"
+    $pattern = "$q$package$q\s*:\s*$q([^$q]*)$q"
+    $replacement = "${q}$version${q}"
+    $configContent = $configContent -replace $pattern, $replacement
     Write-Host "  Updated $package to $version in app_config.dart" -ForegroundColor Green
 }
 
 foreach ($package in $devDepOverrides.Keys) {
     $version = $devDepOverrides[$package]
-    $configContent = $configContent -replace "('$package'\s*:\s*')[^']*(')", "`${1}$version`${2}"
+    $pattern = "$q$package$q\s*:\s*$q([^$q]*)$q"
+    $replacement = "${q}$version${q}"
+    $configContent = $configContent -replace $pattern, $replacement
     Write-Host "  Updated $package to $version in app_config.dart" -ForegroundColor Green
 }
 
@@ -382,32 +395,32 @@ Write-Host "Syncing dependencies from app_config.dart to pubspec.yaml..." -Foreg
 $configFileContent = Get-Content $APP_CONFIG_FILE -Raw
 
 # Extract dependencies map
-if ($configFileContent -match "static const Map<String, String> dependencies = \{([^}]+)\}") {
+if ($configFileContent -match $depMapPattern) {
     $depsBlock = $matches[1]
-    $depsBlock -split "`n" | ForEach-Object {
-        if ($_ -match "'([^']+)':\s*'([^']+)'") {
+    $depsBlock -split "`r?`n" | ForEach-Object {
+        if ($_ -match $kvPattern) {
             $package = $matches[1]
             $version = $matches[2]
 
             # Update in pubspec (without ^ for exact versions)
             $pubspecContent = $pubspecContent -replace "^(\s+$package\s*:).*$", "`${1} $version"
-            Write-Host "  ✓ $package`: $version" -ForegroundColor Green
+            Write-Host "  OK:$package`: $version" -ForegroundColor Green
         }
     }
 }
 
 # Extract devDependencies map
 Write-Host "Syncing devDependencies from app_config.dart to pubspec.yaml..." -ForegroundColor Cyan
-if ($configFileContent -match "static const Map<String, String> devDependencies = \{([^}]+)\}") {
+if ($configFileContent -match $devDepMapPattern) {
     $devDepsBlock = $matches[1]
-    $devDepsBlock -split "`n" | ForEach-Object {
-        if ($_ -match "'([^']+)':\s*'([^']+)'") {
+    $devDepsBlock -split "`r?`n" | ForEach-Object {
+        if ($_ -match $kvPattern) {
             $package = $matches[1]
             $version = $matches[2]
 
             # Update in pubspec (without ^ for exact versions)
             $pubspecContent = $pubspecContent -replace "^(\s+$package\s*:).*$", "`${1} $version"
-            Write-Host "  ✓ $package`: $version" -ForegroundColor Green
+            Write-Host "  OK:$package`: $version" -ForegroundColor Green
         }
     }
 }
@@ -448,7 +461,8 @@ Write-Host ""
 Write-Host "Updating Flutter version in GitHub Actions workflow..." -ForegroundColor Cyan
 
 # Get Flutter version from app_config.dart
-$FlutterVersionMatch = Select-String -Path $APP_CONFIG_FILE -Pattern "static const String flutterVersion\s*=\s*'([^']+)'" | Select-Object -First 1
+$flutterPattern = 'static const String flutterVersion\s*=\s*' + [char]39 + '([^' + [char]39 + ']+)' + [char]39
+$FlutterVersionMatch = Select-String -Path $APP_CONFIG_FILE -Pattern $flutterPattern | Select-Object -First 1
 
 if ($FlutterVersionMatch) {
     $FlutterVersion = $FlutterVersionMatch.Matches.Groups[1].Value
@@ -457,9 +471,10 @@ if ($FlutterVersionMatch) {
     if (Test-Path $RELEASE_YML) {
         # Update the FLUTTER_VERSION env variable in release.yml
         $content = Get-Content $RELEASE_YML -Raw
-        $content = $content -replace "(FLUTTER_VERSION:\s*')([^']+)(')", "`${1}$FlutterVersion`${3}"
+        $fvPattern = '(FLUTTER_VERSION:\s*' + [char]39 + ')([^' + [char]39 + ']+)(' + [char]39 + ')'
+        $content = $content -replace $fvPattern, ('${1}' + $FlutterVersion + '${3}')
         Set-Content -Path $RELEASE_YML -Value $content -NoNewline
-        Write-Host "  ✓ Updated $RELEASE_YML with Flutter $FlutterVersion" -ForegroundColor Green
+        Write-Host "  OK:Updated $RELEASE_YML with Flutter $FlutterVersion" -ForegroundColor Green
     } else {
         Write-Host "WARNING: $RELEASE_YML not found, skipping..." -ForegroundColor Yellow
     }
@@ -489,17 +504,17 @@ if ($FlutterVersion) {
 }
 Write-Host ""
 Write-Host "Updated files:" -ForegroundColor White
-Write-Host "  • $APP_CONFIG_FILE (SOURCE OF TRUTH)" -ForegroundColor Green
-Write-Host "  • $PUBSPEC_FILE (version + dependencies synced)" -ForegroundColor Green
-Write-Host "  • $GRADLE_FILE"
-Write-Host "  • $DESKTOP_FILE"
+Write-Host "  - $APP_CONFIG_FILE (SOURCE OF TRUTH)" -ForegroundColor Green
+Write-Host "  - $PUBSPEC_FILE (version + dependencies synced)" -ForegroundColor Green
+Write-Host "  - $GRADLE_FILE"
+Write-Host "  - $DESKTOP_FILE"
 if ($FlutterVersion -and (Test-Path $RELEASE_YML)) {
-    Write-Host "  • $RELEASE_YML (Flutter version)" -ForegroundColor Green
+    Write-Host "  - $RELEASE_YML (Flutter version)" -ForegroundColor Green
 }
 if ($ICON_NEEDS_UPDATE) {
-    Write-Host "  • $DEST_ICON (copied)"
+    Write-Host "  - $DEST_ICON (copied)"
 } else {
-    Write-Host "  • $DEST_ICON (already up to date)"
+    Write-Host "  - $DEST_ICON (already up to date)"
 }
 Write-Host "--------------------------------------------" -ForegroundColor Green
 Write-Host ""

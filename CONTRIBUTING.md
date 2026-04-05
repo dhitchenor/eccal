@@ -28,8 +28,8 @@ EcCal is a cross-platform diary application built with Flutter, featuring CalDAV
 ## Development Setup
 
 **Prerequisites:**
-- Flutter 3.38.5 or higher
-- Dart SDK (bundled with Flutter)
+- Flutter 3.41.6
+- Dart SDK 3.11.4 (bundled with Flutter)
 - Platform-specific tools (Android Studio, Xcode, etc.)
 
 **Reproducibility:**

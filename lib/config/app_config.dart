@@ -1,7 +1,7 @@
 class AppConfig {
   // App environment variables
   static const String appName = 'EcCal';
-  static const String appVersion = '1.0.0-rc1';
+  static const String appVersion = '1.0.0-rc2';
 
   static const int maxTitleLength = 100;
 
